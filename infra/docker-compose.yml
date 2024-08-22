@@ -24,7 +24,6 @@ services:
     depends_on:
       - db
 
-
   frontend:
     container_name: foodgram-front
     build: ../frontend
