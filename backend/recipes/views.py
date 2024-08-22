@@ -32,7 +32,7 @@ class CustomUserViewSet(UserViewSet):
 
     @action(
         detail=False,
-        methods=['get',],
+        methods=['get', ],
         permission_classes=(permissions.IsAuthenticated,)
     )
     def me(self, request, **kwargs):
@@ -68,7 +68,7 @@ class CustomUserViewSet(UserViewSet):
 
     @action(
         detail=False,
-        methods=['get',],
+        methods=['get', ],
         permission_classes=(permissions.IsAuthenticated,),
     )
     def subscriptions(self, request):
@@ -148,7 +148,7 @@ class RecipeViewSet(viewsets.ModelViewSet):
 
     @action(
         detail=True,
-        methods=['get',],
+        methods=['get', ],
         permission_classes=(permissions.AllowAny,),
         url_path='get-link'
     )
@@ -200,7 +200,7 @@ class RecipeViewSet(viewsets.ModelViewSet):
 
     @action(
         detail=False,
-        methods=['get',],
+        methods=['get', ],
         permission_classes=(permissions.IsAuthenticated,),
     )
     def download_shopping_cart(self, request, **kwargs):
