@@ -156,3 +156,5 @@ DJOSER = {
 }
 
 CSV_FILES_DIR = os.path.join(BASE_DIR, 'data')
+
+CSRF_TRUSTED_ORIGINS = os.getenv('CSRF_TRUSTED_ORIGINS', '')
