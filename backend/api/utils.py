@@ -3,7 +3,7 @@ from string import ascii_letters, digits
 
 from django.shortcuts import get_object_or_404, redirect
 
-from .models import Recipe
+from recipes.models import Recipe
 
 
 def get_short_link(model):

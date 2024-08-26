@@ -20,7 +20,6 @@ DEBUG = os.getenv('DEBUG', 'False')
 
 ALLOWED_HOSTS = ALLOWED_HOSTS = os.getenv('ALLOWED_HOSTS', 'localhost, 127.0.0.1').split(', ')
 
-
 # Application definition
 
 INSTALLED_APPS = [
@@ -30,11 +29,15 @@ INSTALLED_APPS = [
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
+
     'rest_framework',
     'django_filters',
     'rest_framework.authtoken',
     'djoser',
-    'recipes.apps.RecipesConfig'
+
+    'recipes.apps.RecipesConfig',
+    'users.apps.UsersConfig',
+    'api.apps.ApiConfig',
 ]
 
 MIDDLEWARE = [
@@ -134,19 +137,20 @@ MEDIA_ROOT = BASE_DIR / 'media'
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
-AUTH_USER_MODEL = 'recipes.User'
+AUTH_USER_MODEL = 'users.User'
 
 REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': [
         'rest_framework.authentication.TokenAuthentication',
     ],
-    'SEARCH_PARAM': 'name'
+    'SEARCH_PARAM': 'name',
 }
 
 DJOSER = {
     'SERIALIZERS': {
-        'user_create': 'recipes.serializers.CustomUserCreateSerializer',
-        'user': 'recipes.serializers.CustomUserSerializer',
+        'user_create': 'api.serializers.CustomUserCreateSerializer',
+        'user': 'api.serializers.CustomUserSerializer',
+        'current_user': 'api.serializers.CustomUserSerializer',
     },
     'PERMISSIONS': {
         'user': ['djoser.permissions.CurrentUserOrAdminOrReadOnly'],

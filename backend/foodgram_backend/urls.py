@@ -3,12 +3,12 @@ from django.conf.urls.static import static
 from django.contrib import admin
 from django.urls import path, include
 
-from recipes.utils import recipe_redirection
+from api.utils import recipe_redirection
 
 
 urlpatterns = [
     path('admin/', admin.site.urls),
-    path('api/', include('recipes.urls')),
+    path('api/', include('api.urls')),
     path('s/<str:short_link>', recipe_redirection),
 ]
 

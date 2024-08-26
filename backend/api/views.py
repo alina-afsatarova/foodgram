@@ -1,4 +1,5 @@
 from django.db.models import Count, Sum
+from django.core.exceptions import ObjectDoesNotExist
 from django.http import HttpResponse
 from django.shortcuts import get_object_or_404
 from djoser.views import UserViewSet
@@ -7,12 +8,12 @@ from rest_framework import filters, permissions, serializers, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.response import Response
 
-from .filters import RecipeFilter
-from .models import (
+from recipes.models import (
     Favorite, Ingredient, IngredientRecipe,
-    Recipe, ShoppingCart, Subscription,
-    Tag, User
+    Recipe, ShoppingCart, Tag
 )
+from users.models import Subscription, User
+from .filters import RecipeFilter
 from .pagination import CustomPagination
 from .permissions import IsAuthorOrReadOnly
 from .serializers import (
@@ -36,35 +37,36 @@ class CustomUserViewSet(UserViewSet):
         permission_classes=(permissions.IsAuthenticated,)
     )
     def me(self, request, **kwargs):
-        serializer = CustomUserSerializer(request.user)
+        serializer = self.get_serializer(request.user)
         return Response(serializer.data, status=status.HTTP_200_OK)
 
     @action(
         detail=True,
-        methods=['put', 'delete'],
+        methods=['put', ],
         permission_classes=(permissions.IsAuthenticated,)
     )
     def avatar(self, request, **kwargs):
-        if request.method == 'PUT':
-            avatar = request.data.get('avatar')
-            if not avatar:
-                raise serializers.ValidationError(
-                    'Аватар не добавлен!'
-                )
-            serializer = CustomUserSerializer(
-                request.user, data=request.data, partial=True
+        avatar = request.data.get('avatar')
+        if not avatar:
+            raise serializers.ValidationError(
+                'Аватар не добавлен!'
             )
-            serializer.is_valid(raise_exception=True)
-            serializer.save()
-            return Response(
-                {'avatar': serializer.data.get('avatar')},
-                status=status.HTTP_200_OK
-            )
-        if request.method == 'DELETE':
-            user = User.objects.get(id=request.user.id)
-            user.avatar = ''
-            user.save()
-            return Response(status=status.HTTP_204_NO_CONTENT)
+        serializer = CustomUserSerializer(
+            request.user, data=request.data, partial=True
+        )
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        return Response(
+            {'avatar': serializer.data.get('avatar')},
+            status=status.HTTP_200_OK
+        )
+
+    @avatar.mapping.delete
+    def delete_avatar(self, request, **kwargs):
+        user = User.objects.get(id=request.user.id)
+        user.avatar = ''
+        user.save()
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
     @action(
         detail=False,
@@ -81,33 +83,40 @@ class CustomUserViewSet(UserViewSet):
         )
         return self.get_paginated_response(serializer.data)
 
-    @action(
-        detail=True,
-        methods=['post', 'delete'],
-        permission_classes=(permissions.IsAuthenticated,)
-    )
-    def subscribe(self, request, id):
-        subscribed_to = get_object_or_404(
+    def get_subscribed_to(self, id):
+        return get_object_or_404(
             User.objects.annotate(recipes_count=Count('recipes')),
             id=id
         )
-        if request.method == 'POST':
-            serializer = SubscriptionSerializer(
-                subscribed_to, data=request.data, context={'request': request}
+
+    @action(
+        detail=True,
+        methods=['post', ],
+        permission_classes=(permissions.IsAuthenticated,)
+    )
+    def subscribe(self, request, id):
+        subscribed_to = self.get_subscribed_to(id=id)
+        serializer = SubscriptionSerializer(
+            subscribed_to,
+            data=request.data,
+            context={'request': request}
+        )
+        serializer.is_valid(raise_exception=True)
+        Subscription.objects.create(
+            user=request.user, subscribed_to=subscribed_to
+        )
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+    @subscribe.mapping.delete
+    def delete_subscribe(self, request, id):
+        try:
+            subscription = Subscription.objects.get(
+                user=request.user, subscribed_to=self.get_subscribed_to(id=id)
             )
-            serializer.is_valid(raise_exception=True)
-            Subscription.objects.create(
-                user=request.user, subscribed_to=subscribed_to
-            )
-            return Response(serializer.data, status=status.HTTP_201_CREATED)
-        if request.method == 'DELETE':
-            subscriptions = Subscription.objects.filter(
-                user=request.user, subscribed_to=subscribed_to
-            )
-            if subscriptions.exists():
-                subscriptions.delete()
-                return Response(status=status.HTTP_204_NO_CONTENT)
-        return Response(status=status.HTTP_400_BAD_REQUEST)
+        except ObjectDoesNotExist:
+            return Response(status=status.HTTP_400_BAD_REQUEST)
+        subscription.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 class IngredientViewSet(viewsets.ReadOnlyModelViewSet):
@@ -160,41 +169,58 @@ class RecipeViewSet(viewsets.ModelViewSet):
             status=status.HTTP_200_OK
         )
 
-    def post_delete_func(self, request, id, model):
-        recipe = get_object_or_404(Recipe, id=id)
-        if request.method == 'POST':
-            serializer = ShortRecipeSerializer(
-                recipe,
-                data=request.data,
-                context={'request': request, 'model': model}
+    def get_recipe(self, id):
+        return get_object_or_404(Recipe, id=id)
+
+    def post_func(self, request, id, model):
+        recipe = self.get_recipe(id=id)
+        serializer = ShortRecipeSerializer(
+            recipe,
+            data=request.data,
+            context={'request': request, 'model': model}
+        )
+        serializer.is_valid(raise_exception=True)
+        model.objects.create(user=request.user, recipe=recipe)
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+    def delete_func(self, request, id, model):
+        try:
+            obj = model.objects.get(
+                user=request.user,
+                recipe=self.get_recipe(id=id)
             )
-            serializer.is_valid(raise_exception=True)
-            model.objects.create(user=request.user, recipe=recipe)
-            return Response(serializer.data, status=status.HTTP_201_CREATED)
-        if request.method == 'DELETE':
-            obj = model.objects.filter(user=request.user, recipe=recipe)
-            if obj.exists():
-                obj.delete()
-                return Response(status=status.HTTP_204_NO_CONTENT)
-        return Response(status=status.HTTP_400_BAD_REQUEST)
+        except ObjectDoesNotExist:
+            return Response(status=status.HTTP_400_BAD_REQUEST)
+        obj.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
     @action(
         detail=True,
-        methods=['post', 'delete'],
+        methods=['post', ],
         permission_classes=(permissions.IsAuthenticated,),
     )
     def favorite(self, request, **kwargs):
-        return self.post_delete_func(
+        return self.post_func(request=request, id=kwargs['pk'], model=Favorite)
+
+    @favorite.mapping.delete
+    def delete_favorite(self, request, **kwargs):
+        return self.delete_func(
             request=request, id=kwargs['pk'], model=Favorite
         )
 
     @action(
         detail=True,
-        methods=['post', 'delete'],
+        methods=['post', ],
         permission_classes=(permissions.IsAuthenticated,),
     )
     def shopping_cart(self, request, **kwargs):
-        return self.post_delete_func(
+        return self.post_func(
+            request=request, id=kwargs['pk'], model=ShoppingCart
+        )
+
+    @shopping_cart.mapping.delete
+    def delete_shopping_cart(self, request, **kwargs):
+        return self.delete_func(
             request=request, id=kwargs['pk'], model=ShoppingCart
         )
 

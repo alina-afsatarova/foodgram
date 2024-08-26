@@ -1,30 +1,7 @@
-from django.contrib.auth.models import AbstractUser
 from django.core.validators import MinValueValidator, RegexValidator
 from django.db import models
 
-
-class User(AbstractUser):
-    """Модель пользователя."""
-    username = models.CharField(
-        max_length=150,
-        unique=True,
-        blank=False,
-        validators=(RegexValidator(r'^[\w.@+-]+\Z'),),
-    )
-    email = models.EmailField(max_length=254, unique=True, blank=False)
-    first_name = models.CharField('Имя', max_length=150, blank=False)
-    last_name = models.CharField('Фамилия', max_length=150, blank=False)
-    avatar = models.ImageField(
-        'Аватар',
-        upload_to='recipes/images/avatar/',
-        blank=True
-    )
-
-    USERNAME_FIELD = 'email'
-    REQUIRED_FIELDS = ['username', 'first_name', 'last_name']
-
-    def __str__(self):
-        return self.username
+from users.models import User
 
 
 class Ingredient(models.Model):
@@ -78,7 +55,7 @@ class Recipe(models.Model):
     name = models.CharField('Название', max_length=256, blank=False)
     image = models.ImageField(
         'Фото блюда',
-        upload_to='recipes/images/recipes/',
+        upload_to='images/recipes/',
         blank=False
     )
     text = models.TextField('Описание рецепта', blank=False)
@@ -230,29 +207,3 @@ class Favorite(models.Model):
 
     def __str__(self):
         return f'Рецепт: {self.recipe} в избранном у {self.user}'
-
-
-class Subscription(models.Model):
-    """Модель подписки."""
-    user = models.ForeignKey(
-        User,
-        on_delete=models.CASCADE,
-        related_name='subscribed_to',
-        verbose_name='Пользователь'
-    )
-    subscribed_to = models.ForeignKey(
-        User, on_delete=models.CASCADE, verbose_name='Подписан на'
-    )
-
-    class Meta:
-        verbose_name = 'подписки'
-        verbose_name_plural = 'Подписки'
-        constraints = [
-            models.UniqueConstraint(
-                fields=['user', 'subscribed_to'],
-                name='unique_subscription'
-            )
-        ]
-
-    def __str__(self):
-        return f'{self.user} подписан на {self.subscribed_to}'
