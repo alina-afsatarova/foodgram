@@ -248,12 +248,9 @@ class ShortRecipeSerializer(serializers.ModelSerializer):
     """Сериализатор для моделей Favorite, ShoppingCart
     и поля recipes в SubscriptionSerializer.
     """
-
     class Meta:
         model = Recipe
-        fields = (
-            'id', 'name', 'image', 'cooking_time',
-        )
+        fields = ('id', 'name', 'image', 'cooking_time',)
         read_only_fields = ('id', 'name', 'image', 'cooking_time',)
 
     def validate(self, data):
