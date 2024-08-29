@@ -1,8 +1,6 @@
 from django.contrib import admin
-from django.contrib.auth.admin import GroupAdmin
+from django.contrib.auth.admin import GroupAdmin, UserAdmin
 from django.contrib.auth.models import Group
-
-from django.contrib.auth.admin import UserAdmin
 
 from .models import CustomGroup, Subscription, User
 
@@ -10,7 +8,7 @@ from .models import CustomGroup, Subscription, User
 @admin.register(User)
 class UserAdmin(UserAdmin):
     list_display = ('username', 'email', 'first_name', 'last_name')
-    search_fields = ('username', 'email')
+    search_fields = ('username', 'email', 'first_name', 'last_name')
 
 
 @admin.register(Subscription)

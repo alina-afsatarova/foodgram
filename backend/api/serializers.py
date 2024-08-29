@@ -47,6 +47,8 @@ class CustomUserCreateSerializer(UserCreateSerializer):
             'email', 'id', 'username', 'first_name', 'last_name', 'password'
         )
 
+    # проверка соответствия регулярному выражению и проверка на 'me'
+    # осуществленна в users.models
     def validate(self, data):
         if data['email'] == data['username']:
             raise serializers.ValidationError(
@@ -248,6 +250,7 @@ class ShortRecipeSerializer(serializers.ModelSerializer):
     """Сериализатор для моделей Favorite, ShoppingCart
     и поля recipes в SubscriptionSerializer.
     """
+
     class Meta:
         model = Recipe
         fields = ('id', 'name', 'image', 'cooking_time',)

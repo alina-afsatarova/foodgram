@@ -1,7 +1,6 @@
 from django.db.models import Count, Sum
 from django.core.exceptions import ObjectDoesNotExist
 from django.http import HttpResponse
-from django.shortcuts import get_object_or_404
 from djoser.views import UserViewSet
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework import filters, permissions, serializers, status, viewsets
@@ -31,12 +30,15 @@ class CustomUserViewSet(UserViewSet):
     permission_classes = (permissions.IsAuthenticatedOrReadOnly,)
     pagination_class = CustomPagination
 
+    def get_queryset(self):
+        return super().get_queryset().annotate(recipes_count=Count('recipes'))
+
     @action(
         detail=False,
         methods=['get', ],
         permission_classes=(permissions.IsAuthenticated,)
     )
-    def me(self, request, **kwargs):
+    def me(self, request):
         serializer = self.get_serializer(request.user)
         return Response(serializer.data, status=status.HTTP_200_OK)
 
@@ -51,7 +53,7 @@ class CustomUserViewSet(UserViewSet):
             raise serializers.ValidationError(
                 'Аватар не добавлен!'
             )
-        serializer = CustomUserSerializer(
+        serializer = self.get_serializer(
             request.user, data=request.data, partial=True
         )
         serializer.is_valid(raise_exception=True)
@@ -83,35 +85,28 @@ class CustomUserViewSet(UserViewSet):
         )
         return self.get_paginated_response(serializer.data)
 
-    def get_subscribed_to(self, id):
-        return get_object_or_404(
-            User.objects.annotate(recipes_count=Count('recipes')),
-            id=id
-        )
-
     @action(
         detail=True,
         methods=['post', ],
         permission_classes=(permissions.IsAuthenticated,)
     )
-    def subscribe(self, request, id):
-        subscribed_to = self.get_subscribed_to(id=id)
+    def subscribe(self, request, **kwargs):
         serializer = SubscriptionSerializer(
-            subscribed_to,
+            self.get_object(),
             data=request.data,
             context={'request': request}
         )
         serializer.is_valid(raise_exception=True)
         Subscription.objects.create(
-            user=request.user, subscribed_to=subscribed_to
+            user=request.user, subscribed_to=self.get_object()
         )
         return Response(serializer.data, status=status.HTTP_201_CREATED)
 
     @subscribe.mapping.delete
-    def delete_subscribe(self, request, id):
+    def delete_subscribe(self, request, **kwargs):
         try:
             subscription = Subscription.objects.get(
-                user=request.user, subscribed_to=self.get_subscribed_to(id=id)
+                user=request.user, subscribed_to=self.get_object()
             )
         except ObjectDoesNotExist:
             return Response(status=status.HTTP_400_BAD_REQUEST)
@@ -162,32 +157,27 @@ class RecipeViewSet(viewsets.ModelViewSet):
         url_path='get-link'
     )
     def get_link(self, request, **kwargs):
-        recipe = Recipe.objects.get(id=kwargs['pk'])
         return Response(
-            {'short-link':
-             request.build_absolute_uri('/') + 's/' + recipe.short_link},
+            {'short-link': request.build_absolute_uri('/')
+             + 's/' + self.get_object().short_link},
             status=status.HTTP_200_OK
         )
 
-    def get_recipe(self, id):
-        return get_object_or_404(Recipe, id=id)
-
-    def post_func(self, request, id, model):
-        recipe = self.get_recipe(id=id)
+    def post_func(self, request, model):
         serializer = ShortRecipeSerializer(
-            recipe,
+            self.get_object(),
             data=request.data,
             context={'request': request, 'model': model}
         )
         serializer.is_valid(raise_exception=True)
-        model.objects.create(user=request.user, recipe=recipe)
+        model.objects.create(user=request.user, recipe=self.get_object())
         return Response(serializer.data, status=status.HTTP_201_CREATED)
 
-    def delete_func(self, request, id, model):
+    def delete_func(self, request, model):
         try:
             obj = model.objects.get(
                 user=request.user,
-                recipe=self.get_recipe(id=id)
+                recipe=self.get_object()
             )
         except ObjectDoesNotExist:
             return Response(status=status.HTTP_400_BAD_REQUEST)
@@ -200,13 +190,11 @@ class RecipeViewSet(viewsets.ModelViewSet):
         permission_classes=(permissions.IsAuthenticated,),
     )
     def favorite(self, request, **kwargs):
-        return self.post_func(request=request, id=kwargs['pk'], model=Favorite)
+        return self.post_func(request=request, model=Favorite)
 
     @favorite.mapping.delete
     def delete_favorite(self, request, **kwargs):
-        return self.delete_func(
-            request=request, id=kwargs['pk'], model=Favorite
-        )
+        return self.delete_func(request=request, model=Favorite)
 
     @action(
         detail=True,
@@ -214,25 +202,21 @@ class RecipeViewSet(viewsets.ModelViewSet):
         permission_classes=(permissions.IsAuthenticated,),
     )
     def shopping_cart(self, request, **kwargs):
-        return self.post_func(
-            request=request, id=kwargs['pk'], model=ShoppingCart
-        )
+        return self.post_func(request=request, model=ShoppingCart)
 
     @shopping_cart.mapping.delete
     def delete_shopping_cart(self, request, **kwargs):
-        return self.delete_func(
-            request=request, id=kwargs['pk'], model=ShoppingCart
-        )
+        return self.delete_func(request=request, model=ShoppingCart)
 
     @action(
         detail=False,
         methods=['get', ],
         permission_classes=(permissions.IsAuthenticated,),
     )
-    def download_shopping_cart(self, request, **kwargs):
+    def download_shopping_cart(self, request):
         indredients = IngredientRecipe.objects.filter(
             recipe__shopping_cart__user=request.user
-        ). values(
+        ).values(
             'ingredient__name', 'ingredient__measurement_unit'
         ).annotate(amount_sum=Sum('amount'))
         shopping_cart = ''
