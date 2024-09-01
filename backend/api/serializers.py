@@ -41,14 +41,13 @@ class CheckMixin(serializers.ModelSerializer):
 
 class CustomUserCreateSerializer(UserCreateSerializer):
     """Сериализатор для создания пользователя."""
+
     class Meta:
         model = User
         fields = (
             'email', 'id', 'username', 'first_name', 'last_name', 'password'
         )
 
-    # проверка соответствия регулярному выражению и проверка на 'me'
-    # осуществленна в users.models
     def validate(self, data):
         if data['email'] == data['username']:
             raise serializers.ValidationError(
@@ -60,6 +59,7 @@ class CustomUserCreateSerializer(UserCreateSerializer):
 
 class CustomUserSerializer(UserSerializer, CheckMixin):
     """Сериализатор для модели User."""
+
     is_subscribed = serializers.SerializerMethodField()
     avatar = Base64ImageField()
 
@@ -74,8 +74,22 @@ class CustomUserSerializer(UserSerializer, CheckMixin):
         return self.checking_fields(model=Subscription, obj=obj)
 
 
+class AvatarSerializer(CustomUserSerializer):
+    """Сериализатор для модели User при PUT-запросе на добавление аватара."""
+
+    class Meta:
+        model = User
+        fields = ('avatar',)
+
+    def validate(self, data):
+        if not data.get('avatar'):
+            raise serializers.ValidationError('Аватар не добавлен!')
+        return data
+
+
 class IngredientSerializer(serializers.ModelSerializer):
     """Сериализатор для модели Ingredient."""
+
     class Meta:
         model = Ingredient
         fields = ('id', 'name', 'measurement_unit')
@@ -83,6 +97,7 @@ class IngredientSerializer(serializers.ModelSerializer):
 
 class IngredientForRecipeCreateSerializer(serializers.ModelSerializer):
     """Сериализатор для поля ingredients в RecipeCreateSerializer."""
+
     id = serializers.IntegerField()
     amount = serializers.IntegerField()
 
@@ -100,6 +115,7 @@ class IngredientForRecipeCreateSerializer(serializers.ModelSerializer):
 
 class IngredientForRecipeReadSerializer(serializers.ModelSerializer):
     """Сериализатор для поля ingredients в RecipeReadSerializer."""
+
     id = serializers.ReadOnlyField(source='ingredient.id')
     name = serializers.ReadOnlyField(source='ingredient.name')
     measurement_unit = serializers.ReadOnlyField(
@@ -113,6 +129,7 @@ class IngredientForRecipeReadSerializer(serializers.ModelSerializer):
 
 class TagSerializer(serializers.ModelSerializer):
     """Сериализатор для модели Tag."""
+
     class Meta:
         model = Tag
         fields = ('id', 'name', 'slug')
@@ -247,18 +264,24 @@ class RecipeCreateSerializer(serializers.ModelSerializer):
 
 
 class ShortRecipeSerializer(serializers.ModelSerializer):
-    """Сериализатор для моделей Favorite, ShoppingCart
-    и поля recipes в SubscriptionSerializer.
+    """Сериализатор для модели Recipe (укороченный вариант).
+
+    Используется в FavoriteSerializer,
+    ShoppingCartSerializer,
+    UserWithRecipesSerializer.
     """
 
     class Meta:
         model = Recipe
         fields = ('id', 'name', 'image', 'cooking_time',)
-        read_only_fields = ('id', 'name', 'image', 'cooking_time',)
+
+
+class FavoriteShoppingCartMixin(serializers.ModelSerializer):
+    """Миксин для сериализаторов FavoriteSerializer, ShoppingCartSerializer."""
 
     def validate(self, data):
         user = self.context.get('request').user
-        recipe = self.instance
+        recipe = self.context.get('recipe')
         model = self.context.get('model')
         if model.objects.filter(user=user, recipe=recipe).exists():
             raise serializers.ValidationError(
@@ -266,24 +289,62 @@ class ShortRecipeSerializer(serializers.ModelSerializer):
             )
         return data
 
+    def to_representation(self, instance):
+        serializer = ShortRecipeSerializer(instance.recipe)
+        return serializer.data
 
-class SubscriptionSerializer(CheckMixin):
-    """Сериализатор для модели Subscription."""
-    is_subscribed = serializers.SerializerMethodField()
+
+class FavoriteSerializer(FavoriteShoppingCartMixin):
+    """Сериализатор для модели Favorite."""
+
+    class Meta:
+        model = Favorite
+        fields = ('user', 'recipe',)
+        read_only_fields = ('user', 'recipe',)
+
+
+class ShoppingCartSerializer(FavoriteShoppingCartMixin):
+    """Сериализатор для модели ShoppingCart."""
+
+    class Meta:
+        model = ShoppingCart
+        fields = ('user', 'recipe',)
+        read_only_fields = ('user', 'recipe',)
+
+
+class UserWithRecipesSerializer(CustomUserSerializer):
+    """Сериализатор для модели User с его рецептами."""
     recipes = serializers.SerializerMethodField()
-    recipes_count = serializers.IntegerField(read_only=True)
+    recipes_count = serializers.IntegerField(source="recipes.count")
 
     class Meta:
         model = User
         fields = (
-            'id', 'username', 'first_name', 'last_name', 'email',
-            'is_subscribed', 'avatar', 'recipes_count', 'recipes',
+            'email', 'id', 'username', 'first_name', 'last_name',
+            'is_subscribed', 'recipes', 'recipes_count', 'avatar'
         )
-        read_only_fields = ('username', 'first_name', 'last_name', 'email',)
+
+    def get_recipes(self, obj):
+        request = self.context.get('request')
+        recipes_limit = request.query_params.get('recipes_limit')
+        recipes = obj.recipes.all()
+        if recipes_limit:
+            recipes = recipes[:int(recipes_limit)]
+        serializer = ShortRecipeSerializer(recipes, many=True)
+        return serializer.data
+
+
+class SubscriptionSerializer(serializers.ModelSerializer):
+    """Сериализатор для модели Subscription."""
+
+    class Meta:
+        model = Subscription
+        fields = ('user', 'subscribed_to',)
+        read_only_fields = ('user', 'subscribed_to',)
 
     def validate(self, data):
         user = self.context.get('request').user
-        subscribed_to = self.instance
+        subscribed_to = self.context.get('subscribed_to')
         if user == subscribed_to:
             raise serializers.ValidationError(
                 'Нельзя подписаться на самого себя!'
@@ -296,14 +357,9 @@ class SubscriptionSerializer(CheckMixin):
             )
         return data
 
-    def get_is_subscribed(self, obj):
-        return self.checking_fields(model=Subscription, obj=obj)
-
-    def get_recipes(self, obj):
-        request = self.context.get('request')
-        recipes_limit = request.query_params.get('recipes_limit')
-        recipes = obj.recipes.all()
-        if recipes_limit:
-            recipes = recipes[:int(recipes_limit)]
-        serializer = ShortRecipeSerializer(recipes, many=True)
+    def to_representation(self, instance):
+        serializer = UserWithRecipesSerializer(
+            instance.subscribed_to,
+            context=self.context
+        )
         return serializer.data

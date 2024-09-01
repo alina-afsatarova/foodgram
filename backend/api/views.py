@@ -1,9 +1,9 @@
-from django.db.models import Count, Sum
 from django.core.exceptions import ObjectDoesNotExist
+from django.db.models import Sum
 from django.http import HttpResponse
-from djoser.views import UserViewSet
 from django_filters.rest_framework import DjangoFilterBackend
-from rest_framework import filters, permissions, serializers, status, viewsets
+from djoser.views import UserViewSet
+from rest_framework import filters, permissions, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.response import Response
 
@@ -16,22 +16,38 @@ from .filters import RecipeFilter
 from .pagination import CustomPagination
 from .permissions import IsAuthorOrReadOnly
 from .serializers import (
-    CustomUserSerializer, IngredientSerializer,
+    AvatarSerializer, CustomUserSerializer,
+    FavoriteSerializer, IngredientSerializer,
     RecipeCreateSerializer, RecipeReadSerializer,
-    ShortRecipeSerializer, SubscriptionSerializer,
-    TagSerializer
+    ShoppingCartSerializer, SubscriptionSerializer,
+    TagSerializer, UserWithRecipesSerializer
 )
 from .utils import get_short_link
 
 
 class CustomUserViewSet(UserViewSet):
+    """Вьюсет для модели User."""
     queryset = User.objects.all()
     serializer_class = CustomUserSerializer
     permission_classes = (permissions.IsAuthenticatedOrReadOnly,)
     pagination_class = CustomPagination
 
     def get_queryset(self):
-        return super().get_queryset().annotate(recipes_count=Count('recipes'))
+        if self.action == 'subscriptions':
+            queryset = User.objects.filter(
+                subscription__user=self.request.user
+            )
+            return queryset
+        return super().get_queryset()
+
+    def get_serializer_class(self):
+        if self.action == 'avatar':
+            return AvatarSerializer
+        if self.action == 'subscriptions':
+            return UserWithRecipesSerializer
+        if self.action == 'subscribe':
+            return SubscriptionSerializer
+        return super().get_serializer_class()
 
     @action(
         detail=False,
@@ -39,6 +55,7 @@ class CustomUserViewSet(UserViewSet):
         permission_classes=(permissions.IsAuthenticated,)
     )
     def me(self, request):
+        """Получение информации о текущем пользователе."""
         serializer = self.get_serializer(request.user)
         return Response(serializer.data, status=status.HTTP_200_OK)
 
@@ -48,26 +65,18 @@ class CustomUserViewSet(UserViewSet):
         permission_classes=(permissions.IsAuthenticated,)
     )
     def avatar(self, request, **kwargs):
-        avatar = request.data.get('avatar')
-        if not avatar:
-            raise serializers.ValidationError(
-                'Аватар не добавлен!'
-            )
+        """Добавление аватара."""
         serializer = self.get_serializer(
             request.user, data=request.data, partial=True
         )
         serializer.is_valid(raise_exception=True)
         serializer.save()
-        return Response(
-            {'avatar': serializer.data.get('avatar')},
-            status=status.HTTP_200_OK
-        )
+        return Response(serializer.data, status=status.HTTP_200_OK)
 
     @avatar.mapping.delete
     def delete_avatar(self, request, **kwargs):
-        user = User.objects.get(id=request.user.id)
-        user.avatar = ''
-        user.save()
+        """Удаление аватара."""
+        request.user.avatar.delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
 
     @action(
@@ -76,11 +85,9 @@ class CustomUserViewSet(UserViewSet):
         permission_classes=(permissions.IsAuthenticated,),
     )
     def subscriptions(self, request):
-        subscribed_to = User.objects.filter(
-            subscription__user=request.user
-        ).annotate(recipes_count=Count('recipes'))
-        page = self.paginate_queryset(subscribed_to)
-        serializer = SubscriptionSerializer(
+        """Список подписок текущего пользователя."""
+        page = self.paginate_queryset(self.get_queryset())
+        serializer = self.get_serializer(
             page, many=True, context={'request': request}
         )
         return self.get_paginated_response(serializer.data)
@@ -91,19 +98,18 @@ class CustomUserViewSet(UserViewSet):
         permission_classes=(permissions.IsAuthenticated,)
     )
     def subscribe(self, request, **kwargs):
-        serializer = SubscriptionSerializer(
-            self.get_object(),
+        """Подписка на пользователя."""
+        serializer = self.get_serializer(
             data=request.data,
-            context={'request': request}
+            context={'request': request, 'subscribed_to': self.get_object()}
         )
         serializer.is_valid(raise_exception=True)
-        Subscription.objects.create(
-            user=request.user, subscribed_to=self.get_object()
-        )
+        serializer.save(user=request.user, subscribed_to=self.get_object())
         return Response(serializer.data, status=status.HTTP_201_CREATED)
 
     @subscribe.mapping.delete
     def delete_subscribe(self, request, **kwargs):
+        """Отписка от пользователя."""
         try:
             subscription = Subscription.objects.get(
                 user=request.user, subscribed_to=self.get_object()
@@ -115,6 +121,7 @@ class CustomUserViewSet(UserViewSet):
 
 
 class IngredientViewSet(viewsets.ReadOnlyModelViewSet):
+    """Вьюсет для модели Ingredient."""
     queryset = Ingredient.objects.all()
     serializer_class = IngredientSerializer
     permission_classes = (permissions.AllowAny,)
@@ -123,12 +130,14 @@ class IngredientViewSet(viewsets.ReadOnlyModelViewSet):
 
 
 class TagViewSet(viewsets.ReadOnlyModelViewSet):
+    """Вьюсет для модели Tag."""
     queryset = Tag.objects.all()
     serializer_class = TagSerializer
     permission_classes = (permissions.AllowAny,)
 
 
 class RecipeViewSet(viewsets.ModelViewSet):
+    """Вьюсет для модели Recipe."""
     queryset = Recipe.objects.all()
     serializer_class = RecipeCreateSerializer
     permission_classes = (
@@ -146,6 +155,10 @@ class RecipeViewSet(viewsets.ModelViewSet):
         )
 
     def get_serializer_class(self):
+        if self.action == 'favorite':
+            return FavoriteSerializer
+        if self.action == 'shopping_cart':
+            return ShoppingCartSerializer
         if self.action in ('list', 'retrieve'):
             return RecipeReadSerializer
         return RecipeCreateSerializer
@@ -157,6 +170,7 @@ class RecipeViewSet(viewsets.ModelViewSet):
         url_path='get-link'
     )
     def get_link(self, request, **kwargs):
+        """Получение короткой ссылки на рецепт."""
         return Response(
             {'short-link': request.build_absolute_uri('/')
              + 's/' + self.get_object().short_link},
@@ -164,16 +178,21 @@ class RecipeViewSet(viewsets.ModelViewSet):
         )
 
     def post_func(self, request, model):
-        serializer = ShortRecipeSerializer(
-            self.get_object(),
+        """Добавление рецепта в Избранное или в Список покупок."""
+        serializer = self.get_serializer(
             data=request.data,
-            context={'request': request, 'model': model}
+            context={
+                'request': request,
+                'recipe': self.get_object(),
+                'model': model
+            }
         )
         serializer.is_valid(raise_exception=True)
-        model.objects.create(user=request.user, recipe=self.get_object())
+        serializer.save(user=request.user, recipe=self.get_object())
         return Response(serializer.data, status=status.HTTP_201_CREATED)
 
     def delete_func(self, request, model):
+        """Удаление рецепта из Избранного или Списка покупок."""
         try:
             obj = model.objects.get(
                 user=request.user,
@@ -214,6 +233,7 @@ class RecipeViewSet(viewsets.ModelViewSet):
         permission_classes=(permissions.IsAuthenticated,),
     )
     def download_shopping_cart(self, request):
+        """Скачивание Списка покупок."""
         indredients = IngredientRecipe.objects.filter(
             recipe__shopping_cart__user=request.user
         ).values(
